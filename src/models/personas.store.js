@@ -37,4 +37,11 @@ function clear() {
   personas = [];
 }
 
-module.exports = { loadExamples, list, add, clear };
+function remove(id) {
+    const idx = personas.findIndex((p) => p.id === id);
+    if (idx === -1) return false;
+    personas.splice(idx, 1);
+    return true;
+  }
+  
+  module.exports = { loadExamples, list, add, clear, remove };
