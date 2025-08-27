@@ -5,6 +5,7 @@ const config = require('./utils/config'); // ← add this
 const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
 const personasRouter = require('./routes/personas');
+const { loadExamples } = require('./models/personas.store');
 
 const app = express();
 const PORT = config.port; // ← use config
@@ -20,6 +21,8 @@ app.use('/api/v1/db', dbRouter);
 app.use('/api/v1/personas', personasRouter);
 
 app.use('/api/v1/health', healthRouter);
+loadExamples();
+
 
 app.listen(PORT, () => {
   console.log(`Server is listening on http://localhost:${PORT} (${config.nodeEnv})`);
