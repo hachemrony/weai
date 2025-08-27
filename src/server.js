@@ -4,6 +4,7 @@ const healthRouter = require('./routes/health');
 const config = require('./utils/config'); // ← add this
 const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
+const personasRouter = require('./routes/personas');
 
 const app = express();
 const PORT = config.port; // ← use config
@@ -16,6 +17,7 @@ app.get('/', (req, res) => {
 });
 app.use(logger); 
 app.use('/api/v1/db', dbRouter);
+app.use('/api/v1/personas', personasRouter);
 
 app.use('/api/v1/health', healthRouter);
 
