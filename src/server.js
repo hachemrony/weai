@@ -6,6 +6,7 @@ const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
 const personasRouter = require('./routes/personas');
 const { loadExamples } = require('./models/personas.store');
+const postsRouter = require('./routes/posts');
 
 const app = express();
 const PORT = config.port; // ← use config
@@ -19,6 +20,7 @@ app.get('/', (req, res) => {
 app.use(logger); 
 app.use('/api/v1/db', dbRouter);
 app.use('/api/v1/personas', personasRouter);
+app.use('/api/v1/posts', postsRouter); 
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
