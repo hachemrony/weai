@@ -10,8 +10,10 @@ router.get('/ping', ping);
 // List all personas
 router.get('/', (req, res) => {
     const items = list();
+  
     const page = Math.max(parseInt(req.query.page || '1', 10), 1);
     const limit = Math.max(parseInt(req.query.limit || '10', 10), 1);
+  
     const start = (page - 1) * limit;
     const end = start + limit;
     const paged = items.slice(start, end);
