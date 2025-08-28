@@ -9,6 +9,8 @@ const { loadExamples } = require('./models/personas.store');
 const postsRouter = require('./routes/posts');
 const simulateRouter = require('./routes/simulate');
 const corsOptions = require('./utils/corsOptions');
+const generateRouter = require('./routes/generate');
+const diagRouter = require('./routes/diag');
 
 const app = express();
 const PORT = config.port; // ← use config
@@ -24,6 +26,8 @@ app.use('/api/v1/db', dbRouter);
 app.use('/api/v1/personas', personasRouter);
 app.use('/api/v1/posts', postsRouter); 
 app.use('/api/v1/simulate', simulateRouter); 
+app.use('/api/v1/generate', generateRouter);
+app.use('/api/v1/diag', diagRouter);
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
