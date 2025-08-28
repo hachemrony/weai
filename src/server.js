@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const healthRouter = require('./routes/health');
-const config = require('./utils/config'); // ← add this
+const config = require('./utils/config');
 const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
 const personasRouter = require('./routes/personas');
@@ -11,9 +11,11 @@ const simulateRouter = require('./routes/simulate');
 const corsOptions = require('./utils/corsOptions');
 const generateRouter = require('./routes/generate');
 const diagRouter = require('./routes/diag');
+const HOST = process.env.HOST || '127.0.0.1';
+const modqueueRouter = require('./routes/modqueue');
 
 const app = express();
-const PORT = config.port; // ← use config
+const PORT = config.port;
 
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -28,11 +30,12 @@ app.use('/api/v1/posts', postsRouter);
 app.use('/api/v1/simulate', simulateRouter); 
 app.use('/api/v1/generate', generateRouter);
 app.use('/api/v1/diag', diagRouter);
+app.use('/api/v1/modqueue', modqueueRouter);
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
 
 
-app.listen(PORT, () => {
-  console.log(`Server is listening on http://localhost:${PORT} (${config.nodeEnv})`);
+app.listen(PORT, HOST, () => { 
+  console.log(`API listening on http://${HOST}:${PORT} (${config.nodeEnv})`);
 });
