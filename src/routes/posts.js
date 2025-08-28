@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { list, add, remove } = require('../models/posts.store');
 const { list: listPersonas } = require('../models/personas.store');
+const { checkText } = require('../utils/moderation');
 
 const router = Router();
 
@@ -15,21 +16,22 @@ router.get('/', (req, res) => {
 // POST /api/v1/posts { personaId, content, tags? }
 router.post('/', (req, res) => {
     try {
-      const MAX_LEN = 300; // clamp to ~2–3 short paragraphs
+      const MAX_LEN = 300;
       const { personaId, content = '', tags = [] } = req.body || {};
   
       if (!personaId) return res.status(400).json({ error: 'personaId is required' });
-  
       const personaExists = listPersonas().some((p) => p.id === personaId);
       if (!personaExists) return res.status(404).json({ error: 'persona not found' });
   
-      // basic sanitize: drop control chars, trim, clamp
       let clean = String(content).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
       if (!clean) return res.status(400).json({ error: 'content is empty' });
       if (clean.length > MAX_LEN) clean = clean.slice(0, MAX_LEN - 1) + '…';
   
-      const safeTags = Array.isArray(tags) ? tags.slice(0, 5) : [];
+      // NEW: moderation check
+      const verdict = checkText(clean);
+      if (!verdict.ok) return res.status(400).json({ error: `blocked: ${verdict.reason}` });
   
+      const safeTags = Array.isArray(tags) ? tags.slice(0, 5) : [];
       const post = add({ personaId, content: clean, tags: safeTags });
       return res.status(201).json(post);
     } catch (e) {
