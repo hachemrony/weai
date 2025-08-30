@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WeAI – Moderation Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --warn:#f59e0b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
+    header { padding: 16px 20px; border-bottom: 1px solid #1f2937; display:flex; gap:16px; align-items:center; }
+    header h1 { margin:0; font-size: 18px; letter-spacing: .5px; }
+    .pill { padding: 6px 10px; background:#0b1220; border:1px solid #1f2937; border-radius: 10px; display:flex; gap:8px; align-items:center; }
+    input[type="password"], input[type="text"] { background:#0b1220; color:var(--text); border:1px solid #1f2937; border-radius: 8px; padding:8px 10px; min-width:280px; }
+    button { border:1px solid #1f2937; background:#0b1220; color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; }
+    button:hover { border-color:#334155; }
+    button.approve { border-color:#14532d; }
+    button.reject  { border-color:#7f1d1d; }
+    button.small { padding:6px 10px; font-size: 13px; }
+    main { padding: 18px 20px; display:grid; gap:14px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .cards { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card { background:var(--panel); border:1px solid #1f2937; border-radius: 12px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .meta { font-size:12px; color:var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
+    .content { white-space: pre-wrap; line-height:1.35; }
+    .badges { display:flex; gap:8px; flex-wrap:wrap; }
+    .badge { font-size:11px; padding:3px 6px; border-radius: 999px; border:1px solid #334155; color:#cbd5e1; }
+    .badge.flag { border-color: var(--warn); color: #fde68a; }
+    .badge.illicit { border-color: #4c1d95; color:#e9d5ff; }
+    .footer { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .muted { color:var(--muted); font-size:12px; }
+    .right { display:flex; gap:8px; }
+    .notice { background:#0b1220; border:1px solid #1f2937; padding:10px 12px; border-radius:10px; }
+    .ok { color:var(--accent); }
+    .err { color:var(--danger); }
+    .divider { height:1px; background:#1f2937; margin:8px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WeAI – Moderation Admin</h1>
+    <div class="pill">
+      <span class="muted">Token</span>
+      <input id="token" type="password" placeholder="x-admin-token..." />
+      <button id="saveToken" class="small">Save</button>
+      <span id="tokenState" class="muted">not set</span>
+    </div>
+    <div class="pill">
+        <button id="btn-refresh-queue">Refresh queue</button>
+        <button id="btn-view-audit">View audit</button>
+    </div>
+    <div class="pill">
+      <span class="muted">Rate limit:</span>
+      <span id="rl" class="muted">–</span>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="notice muted">Ready.</div>
+    <div id="cards" class="cards"></div>
+  </main>
+
+  <script>
+    // --- tiny helpers ---
+    const $ = (q) => document.querySelector(q);
+    const setStatus = (msg, kind = 'ok') => {
+      const bar = $('#status');
+      if (!bar) return;
+      bar.textContent = msg;
+      bar.className = kind; // css colors .ok / .err
+    };
+    
+    // --- token-aware fetch wrapper ---
+    async function api(path, opts = {}) {
+      const token   = (localStorage.getItem('admin_token') || '').trim();
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (token) {
+        headers['x-admin-token'] = token;           // our middleware accepts this
+        headers['Authorization'] = `Bearer ${token}`; // and this (belt + suspenders)
+      }
+    
+      const res  = await fetch(path, { cache: 'no-store', ...opts, headers });
+      const ct   = res.headers.get('content-type') || '';
+      const body = ct.includes('application/json') ? await res.json() : await res.text();
+    
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText} — ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+      }
+      return { data: body, headers: res.headers, status: res.status };
+    }
+    
+    function updateRateLimit(headers) {
+      const lim = headers?.get('x-ratelimit-limit');
+      const rem = headers?.get('x-ratelimit-remaining');
+      const el  = document.getElementById('rl'); // existing span
+      if (!el) return;
+      el.textContent = lim ? `Rate limit: ${rem}/${lim}` : 'Rate limit: –';
+    }
+    
+    // --- render cards ---
+    function renderItems(items, mode = 'queue') {
+      const cards = $('#cards');
+      cards.innerHTML = '';
+    
+      if (!items.length) {
+        cards.innerHTML = '<div class="muted">No items.</div>';
+        return;
+      }
+    
+      for (const it of items) {
+        const badges = [];
+        if (mode === 'queue') {
+          if (it.verdict?.flagged) badges.push('<span class="badge flag">flagged</span>');
+          for (const [k, v] of Object.entries(it.verdict?.categories || {})) {
+            if (v === true) badges.push(`<span class="badge ${k}">${k}</span>`);
+          }
+        } else {
+          badges.push(`<span class="badge">${it.type}</span>`);
+        }
+    
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="meta">
+            <span>ID: ${it.id || it._id || '–'}</span>
+            ${it.personaId ? `<span>persona: ${it.personaId}</span>` : ''}
+            ${it.createdAt ? `<span>${new Date(it.createdAt).toLocaleString()}</span>` : ''}
+          </div>
+          <div class="badges">${badges.join(' ')}</div>
+          <div class="content">${
+            String(it.content || '').replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]))
+          }</div>
+          <div class="footer">
+            <span class="muted">${mode === 'queue' ? 'Pending review' : 'Audit record'}</span>
+            <div class="right">
+              ${
+                mode === 'queue'
+                  ? `<button type="button" class="approve" data-act="approve" data-id="${it.id}">Approve</button>
+                     <button type="button" class="reject"  data-act="reject"  data-id="${it.id}">Reject</button>`
+                  : ''
+              }
+            </div>
+          </div>
+        `;
+        cards.appendChild(card);
+      }
+    }
+    
+    // --- loaders ---
+    async function loadQueue(page = 1, limit = 20) {
+      setStatus('Loading queue…');
+      try {
+        const { data, headers } =
+          await api(`/api/v1/modqueue?page=${page}&limit=${limit}&t=${Date.now()}`);
+        updateRateLimit(headers);
+        renderItems(data.items, 'queue');
+        setStatus('Queue loaded', 'ok');
+      } catch (err) {
+        setStatus(err.message || String(err), 'err');
+      }
+    }
+    
+    async function loadAudit(page = 1, limit = 10) {
+      setStatus('Loading audit…');
+      try {
+        const { data, headers } =
+          await api(`/api/v1/audit?page=${page}&limit=${limit}&t=${Date.now()}`);
+        updateRateLimit(headers);
+        renderItems(data.items, 'audit');
+        setStatus('Audit loaded', 'ok');
+      } catch (err) {
+        setStatus(err.message || String(err), 'err');
+      }
+    }
+    
+    // --- one-time wiring ---
+    document.addEventListener('DOMContentLoaded', () => {
+      // token field + save
+      const tokenInput  = document.getElementById('token');
+      const tokenState  = document.getElementById('tokenState');
+      const saveBtn     = document.getElementById('save');
+    
+      const saved = localStorage.getItem('admin_token') || '';
+      if (tokenInput) tokenInput.value = saved;
+      if (tokenState) tokenState.textContent = saved ? 'saved' : 'not set';
+    
+      saveBtn?.addEventListener('click', () => {
+        const val = (tokenInput?.value || '').trim();
+        localStorage.setItem('admin_token', val);
+        if (tokenState) tokenState.textContent = val ? 'saved' : 'not set';
+        setStatus('saved', 'ok');
+      });
+    
+      // buttons (support both id styles)
+      const btnRefresh = document.getElementById('btn-refresh-queue') || document.getElementById('btnQueue');
+      const btnAudit   = document.getElementById('btn-view-audit')    || document.getElementById('btnAudit');
+    
+      btnRefresh?.addEventListener('click', () => loadQueue());
+      btnAudit?.addEventListener('click',   () => loadAudit());
+    
+      // approve / reject (event delegation)
+      document.getElementById('cards')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+    
+        const id  = btn.dataset.id;
+        const act = btn.dataset.act;
+        try {
+          btn.disabled = true;
+          const res = await api(`/api/v1/modqueue/${encodeURIComponent(id)}/${act}`, { method: 'POST' });
+          updateRateLimit(res.headers);
+          setStatus(`✓ ${act} OK for ${id}`, 'ok');
+          await loadQueue();
+        } catch (err) {
+          setStatus(err.message || String(err), 'err');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    
+      // initial population
+      saved ? loadQueue() : setStatus('Enter admin token and click Save', 'err');
+    });
+    </script>
+    
+  
+</body>
+</html>

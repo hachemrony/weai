@@ -29,9 +29,16 @@ const auditRouter = require('./routes/audit');
 const app = express();
 const PORT = config.port;
 
+const WEB_DIR = path.resolve(__dirname, '../web');
+app.use(express.static(WEB_DIR));
+
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(logger); 
+
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(WEB_DIR, 'admin.html'));
+});
 
 app.get('/', (req, res) => {
   res.send(`${config.appName} is running full power 🚀`);
@@ -45,6 +52,7 @@ app.use('/api/v1/diag', diagRouter);
 
 app.use('/api/v1/modqueue', adminAuth, modqueueRouter);
 app.use('/api/v1/audit', adminAuth, auditRouter);
+app.use(express.static(path.resolve(__dirname, 'web')));
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
