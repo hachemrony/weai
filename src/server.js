@@ -1,3 +1,12 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
+
+if (!process.env.ADMIN_API_TOKEN && process.env.NODE_ENV !== 'production') {
+  process.env.ADMIN_API_TOKEN = 'weai-admin-dev-123';
+  console.warn('[DEV ONLY] ADMIN_API_TOKEN defaulted');
+}
+
+
 const express = require('express');
 const cors = require('cors');
 const healthRouter = require('./routes/health');
@@ -13,24 +22,29 @@ const generateRouter = require('./routes/generate');
 const diagRouter = require('./routes/diag');
 const HOST = process.env.HOST || '127.0.0.1';
 const modqueueRouter = require('./routes/modqueue');
+const adminAuth = require('./utils/adminAuth');
+const auditRouter = require('./routes/audit');
+
 
 const app = express();
 const PORT = config.port;
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(logger); 
 
 app.get('/', (req, res) => {
   res.send(`${config.appName} is running full power 🚀`);
 });
-app.use(logger); 
 app.use('/api/v1/db', dbRouter);
 app.use('/api/v1/personas', personasRouter);
 app.use('/api/v1/posts', postsRouter); 
-app.use('/api/v1/simulate', simulateRouter); 
+// app.use('/api/v1/simulate', simulateRouter); 
 app.use('/api/v1/generate', generateRouter);
 app.use('/api/v1/diag', diagRouter);
-app.use('/api/v1/modqueue', modqueueRouter);
+
+app.use('/api/v1/modqueue', adminAuth, modqueueRouter);
+app.use('/api/v1/audit', adminAuth, auditRouter);
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
