@@ -24,6 +24,8 @@ const HOST = process.env.HOST || '127.0.0.1';
 const modqueueRouter = require('./routes/modqueue');
 const adminAuth = require('./utils/adminAuth');
 const auditRouter = require('./routes/audit');
+const visualsRouter = require('./routes/visuals');
+const { startVisualsWorker } = require('./workers/visuals.worker');
 
 
 const app = express();
@@ -53,11 +55,14 @@ app.use('/api/v1/diag', diagRouter);
 app.use('/api/v1/modqueue', adminAuth, modqueueRouter);
 app.use('/api/v1/audit', adminAuth, auditRouter);
 app.use(express.static(path.resolve(__dirname, 'web')));
+app.use('/api/v1/visuals', visualsRouter);
+app.use('/mock', express.static(path.resolve(__dirname, '..', 'mock')));
+
 
 app.use('/api/v1/health', healthRouter);
 loadExamples();
 
-
+startVisualsWorker();
 app.listen(PORT, HOST, () => { 
   console.log(`API listening on http://${HOST}:${PORT} (${config.nodeEnv})`);
 });

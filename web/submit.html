@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>WeAI – Submit Post</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;padding:24px;background:#0d1117;color:#e6edf3}
+  label{display:block;margin:.5rem 0 .25rem;color:#9fb1c8}
+  input,textarea,button{width:100%;max-width:720px;padding:.6rem;border-radius:8px;border:1px solid #2d3440;background:#161b22;color:#e6edf3}
+  textarea{min-height:120px}
+  .row{margin:1rem 0}
+  .ok{color:#4ade80}.err{color:#f87171}
+</style>
+<body>
+  <h1>Submit Post</h1>
+
+  <div class="row">
+    <label for="persona">Persona ID</label>
+    <input id="persona" placeholder="TEMP-ALFA" value="TEMP-ALFA" />
+  </div>
+
+  <div class="row">
+    <label for="content">Content</label>
+    <textarea id="content" placeholder="Type something…"></textarea>
+  </div>
+
+  <div class="row">
+    <label for="tags">Tags (comma-separated, optional)</label>
+    <input id="tags" placeholder="demo, example" />
+  </div>
+
+  <div class="row">
+    <button id="submitBtn">Submit</button>
+  </div>
+
+  <div id="status" class="row"></div>
+
+  <p class="row"><a href="/admin.html">Go to Admin</a></p>
+
+  <script>
+    // helpers
+    const $ = (q) => document.querySelector(q);
+    const setStatus = (m, kind = '') => {
+      const el = $('#status'); if (!el) return;
+      el.textContent = m; el.className = kind; // .ok/.err styled in your CSS
+    };
+  
+    // persist persona/tags across refreshes
+    const personaEl = $('#persona');
+    const contentEl = $('#content');
+    const tagsEl    = $('#tags');
+    const btn       = $('#submitBtn');
+  
+    personaEl.value = localStorage.getItem('submit_persona') || personaEl.value || 'TEMP-ALFA';
+    tagsEl.value    = localStorage.getItem('submit_tags')    || tagsEl.value    || '';
+  
+    personaEl.addEventListener('input', () => localStorage.setItem('submit_persona', personaEl.value.trim()));
+    tagsEl.addEventListener('input',    () => localStorage.setItem('submit_tags',    tagsEl.value.trim()));
+  
+    // core submit
+    async function submitPost() {
+      const personaId = personaEl.value.trim();
+      const content   = contentEl.value.trim();
+      const tags      = tagsEl.value.split(',').map(s => s.trim()).filter(Boolean);
+  
+      if (!personaId || !content) { setStatus('personaId and content are required', 'err'); return; }
+  
+      try {
+        btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = 'Submitting…';
+        setStatus('Submitting…');
+  
+        const res = await fetch('/api/v1/posts', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ personaId, content: `${content} — ${Date.now()}`, tags })
+        });
+  
+        const ct   = res.headers.get('content-type') || '';
+        const body = ct.includes('application/json') ? await res.json() : null;
+  
+        if (res.status === 201) {
+          setStatus('Posted ✅ (approved immediately)', 'ok');
+          contentEl.value = '';
+        } else if (res.status === 202) {
+          setStatus('Queued ✔ (awaiting moderation)', 'ok');
+          contentEl.value = '';
+        } else {
+          throw new Error(`HTTP ${res.status} ${res.statusText} — ${JSON.stringify(body)}`);
+        }
+      } catch (err) {
+        setStatus(err.message || String(err), 'err');
+      } finally {
+        btn.textContent = btn.dataset.label || 'Submit';
+        btn.disabled = false;
+      }
+    }
+  
+    // click & keyboard (Cmd/Ctrl+Enter)
+    btn.addEventListener('click', submitPost);
+    contentEl.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submitPost();
+    });
+  </script>  
+  
+</body>
+</html>

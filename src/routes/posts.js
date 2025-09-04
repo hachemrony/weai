@@ -35,7 +35,7 @@ router.post('/', rateLimit({ windowMs: 15_000, max: 5 }), async (req, res) => {
     const verdict = await checkText(clean);
 
     if (!verdict.ok) {
-        const queued = enqueueModeration({ personaId, content: clean, tags: safeTags, verdict });
+        const queued = enqueueModeration({ personaId, content: clean, tags: safeTags, verdict, status: 'queued',  media: [], });
 
         // audit: queued for moderation
         audit.add({
@@ -51,7 +51,7 @@ router.post('/', rateLimit({ windowMs: 15_000, max: 5 }), async (req, res) => {
     }
   
      // otherwise: created
-    const post = add({ personaId, content: clean, tags: safeTags });
+    const post = add({ personaId, content: clean, tags: safeTags, status: 'posted', media: [], });
 
     // audit: post created
     audit.add({

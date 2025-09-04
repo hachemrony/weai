@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <title>WeAI – Moderation Admin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+
   <style>
     :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --warn:#f59e0b; }
     * { box-sizing: border-box; }
@@ -34,6 +36,7 @@
     .ok { color:var(--accent); }
     .err { color:var(--danger); }
     .divider { height:1px; background:#1f2937; margin:8px 0; }
+
   </style>
 </head>
 <body>
@@ -45,13 +48,17 @@
       <button id="saveToken" class="small">Save</button>
       <span id="tokenState" class="muted">not set</span>
     </div>
-    <div class="pill">
+    <!-- add this toolbar row right after the pill -->
+    <div class="row" style="gap:8px; align-items:center;">
         <button id="btn-refresh-queue">Refresh queue</button>
         <button id="btn-view-audit">View audit</button>
-    </div>
-    <div class="pill">
-      <span class="muted">Rate limit:</span>
-      <span id="rl" class="muted">–</span>
+        <button id="btn-prev" class="muted">‹ Prev</button>
+        <span id="page-info" class="muted">Page 1</span>
+        <button id="btn-next" class="muted">Next ›</button>
+        <button id="btn-view-posts">View posts</button>  
+        <span id="rl" class="muted">Rate limit: –</span>
+        <button id="btn-seed" class="muted">Seed 25 demo posts</button>
+
     </div>
   </header>
 
@@ -61,6 +68,61 @@
   </main>
 
   <script>
+    // Generate visual -> queue job, poll until done, then refresh the list
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-visual');
+        if (!btn) return;
+
+        const postId = btn.dataset.id;
+        if (!postId) return;
+
+        const reset = () => { btn.disabled = false; btn.textContent = 'Generate visual'; };
+
+        btn.disabled = true;
+        btn.textContent = 'Queuing…';
+
+        try {
+            // 1) queue the job
+            const { data } = await api('/api/v1/visuals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                postId,
+                mode: 'animate',
+                instruction: 'gentle camera pan, slight nod',
+                preset: 'pan',
+                durationSec: 4
+            })
+            });
+
+            const jobId = data?.id || data?.jobId;
+            if (!jobId) throw new Error('No job id returned');
+
+            // 2) poll status
+            btn.textContent = 'Generating…';
+            const poll = async () => {
+            const { data: job } = await api(`/api/v1/visuals/${jobId}`);
+            if (job.status === 'finished' || job.status === 'completed') return job;
+            if (job.status === 'failed') throw new Error(job.error || 'Generation failed');
+            await new Promise(r => setTimeout(r, 1200));
+            return poll();
+            };
+
+            await poll();
+
+            // 3) refresh the current view (the worker attached media to the post)
+            btn.textContent = 'Refreshing…';
+            if (currentView === 'queue')       await loadQueue(currentPage, currentLimit);
+            else if (currentView === 'audit')  await loadAudit(currentPage, currentLimit);
+            else                               await loadPosts(currentPage, currentLimit);
+
+        } catch (err) {
+            setStatus(err.message || String(err), 'err');
+        } finally {
+            reset();
+        }
+    });
+
     // --- tiny helpers ---
     const $ = (q) => document.querySelector(q);
     const setStatus = (msg, kind = 'ok') => {
@@ -69,7 +131,80 @@
       bar.textContent = msg;
       bar.className = kind; // css colors .ok / .err
     };
-    
+
+    function busy(el, on, labelBusy = '…') {
+        if (!el) return;
+        if (on) {
+            if (!el.dataset._label) el.dataset._label = el.textContent;
+            el.textContent = labelBusy;
+            el.disabled = true;
+        } else {
+            el.textContent = el.dataset._label || el.textContent;
+            delete el.dataset._label;
+            el.disabled = false;
+        }
+    }
+
+
+    let currentView = 'queue';   // 'queue' | 'audit' | 'posts' (if you use it later)
+    let currentPage = 1;
+    let currentLimit = 20;
+    let lastTotal = 0;           // from API
+
+    // --- pager helpers ---
+    function totalPages() {
+        const total = Number.isFinite(lastTotal) ? lastTotal : 0;
+        const per   = currentLimit || 1;
+        return Math.max(1, Math.ceil(total / per));
+    }
+
+    function updatePager() {
+        const lbl  = document.getElementById('page-info');   // must match HTML id
+        const prev = document.getElementById('btn-prev');
+        const next = document.getElementById('btn-next');
+        const pages = totalPages();
+
+        if (lbl)  lbl.textContent = `Page ${currentPage} / ${pages}`;
+        if (prev) prev.disabled   = currentPage <= 1;
+        if (next) next.disabled   = currentPage >= pages;
+    }
+
+    async function goPrev() {
+        if (currentPage <= 1) return;
+        const p = currentPage - 1;
+        if (currentView === 'queue') return loadQueue(p, currentLimit);
+        if (currentView === 'audit') return loadAudit(p, currentLimit);
+        return loadPosts(p, currentLimit); // if you have posts view
+    }
+
+    async function goNext() {
+        if (currentPage >= totalPages()) return;
+        const p = currentPage + 1;
+        if (currentView === 'queue') return loadQueue(p, currentLimit);
+        if (currentView === 'audit') return loadAudit(p, currentLimit);
+        return loadPosts(p, currentLimit); // if you have posts view
+    }
+
+    document.getElementById('btn-seed')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btn-seed');
+        btn.disabled = true;
+        try {
+            for (let i = 1; i <= 25; i++) {
+            await fetch('/api/v1/posts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ personaId: 'TEMP-ALFA', content: `Hello ${i}`, tags: [] })
+            });
+            }
+            setStatus('Seeded 25 posts', 'ok');
+        } catch (e) {
+            setStatus(e.message || String(e), 'err');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+
     // --- token-aware fetch wrapper ---
     async function api(path, opts = {}) {
       const token   = (localStorage.getItem('admin_token') || '').trim();
@@ -88,6 +223,31 @@
       }
       return { data: body, headers: res.headers, status: res.status };
     }
+
+    // after your other listeners:
+    document.getElementById('btn-refresh-queue')?.addEventListener('click', () => {
+        currentView = 'queue';
+        currentPage = 1;
+        currentLimit = 20;
+        loadQueue(currentPage, currentLimit);
+        updatePager();
+     });
+
+    document.getElementById('btn-view-audit')?.addEventListener('click', () => {
+        currentView = 'audit';
+        currentPage = 1;
+        currentLimit = 30;
+        loadAudit(currentPage, currentLimit);
+        updatePager();
+     });
+
+    document.getElementById('goto')?.addEventListener('change', e=>{
+        const p = Math.max(1, Math.min(+e.target.value|0, totalPages()));
+        if (currentView==='queue') loadQueue(p, currentLimit);
+        else if (currentView==='audit') loadAudit(p, currentLimit);
+        else loadPosts(p, currentLimit);
+    });
+
     
     function updateRateLimit(headers) {
       const lim = headers?.get('x-ratelimit-limit');
@@ -99,79 +259,153 @@
     
     // --- render cards ---
     function renderItems(items, mode = 'queue') {
-      const cards = $('#cards');
-      cards.innerHTML = '';
-    
-      if (!items.length) {
-        cards.innerHTML = '<div class="muted">No items.</div>';
-        return;
-      }
-    
-      for (const it of items) {
+    const cards = document.querySelector('#cards');
+    cards.innerHTML = '';
+    if (!items.length) { cards.innerHTML = '<div class="muted">No items.</div>'; return; }
+
+    for (const it of items) {
         const badges = [];
+
         if (mode === 'queue') {
-          if (it.verdict?.flagged) badges.push('<span class="badge flag">flagged</span>');
-          for (const [k, v] of Object.entries(it.verdict?.categories || {})) {
+        if (it.verdict?.flagged) badges.push('<span class="badge flag">flagged</span>');
+        for (const [k, v] of Object.entries(it.verdict?.categories || {})) {
             if (v === true) badges.push(`<span class="badge ${k}">${k}</span>`);
-          }
-        } else {
-          badges.push(`<span class="badge">${it.type}</span>`);
         }
-    
+        } else if (mode === 'posts') {
+        if (Array.isArray(it.tags) && it.tags.length) {
+            for (const t of it.tags) badges.push(`<span class="badge">${t}</span>`);
+        } else {
+            badges.push('<span class="badge">post</span>');
+        }
+        } else {
+        badges.push(`<span class="badge">${it.type || 'audit'}</span>`);
+        }
+
         const card = document.createElement('div');
         card.className = 'card';
         card.innerHTML = `
-          <div class="meta">
+        <div class="meta">
             <span>ID: ${it.id || it._id || '–'}</span>
             ${it.personaId ? `<span>persona: ${it.personaId}</span>` : ''}
             ${it.createdAt ? `<span>${new Date(it.createdAt).toLocaleString()}</span>` : ''}
-          </div>
-          <div class="badges">${badges.join(' ')}</div>
-          <div class="content">${
+        </div>
+        <div class="badges">${badges.join(' ')}</div>
+        <div class="content">${
             String(it.content || '').replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]))
-          }</div>
-          <div class="footer">
-            <span class="muted">${mode === 'queue' ? 'Pending review' : 'Audit record'}</span>
-            <div class="right">
-              ${
-                mode === 'queue'
-                  ? `<button type="button" class="approve" data-act="approve" data-id="${it.id}">Approve</button>
-                     <button type="button" class="reject"  data-act="reject"  data-id="${it.id}">Reject</button>`
-                  : ''
-              }
+        }</div>
+
+        <div class="footer">
+            <div class="left">
+                <span class="muted">
+                ${mode === 'posts' ? 'Published post' : mode === 'queue' ? 'Pending review' : 'Audit record'}
+                </span>
             </div>
-          </div>
-        `;
-        cards.appendChild(card);
-      }
+            <div class="right">
+                <button type="button" class="small btn-visual" data-id="${it.id}">Generate visual</button>
+                ${mode === 'queue'
+                ? `<button type="button" class="approve" data-act="approve" data-id="${it.id}">Approve</button>
+                    <button type="button" class="reject"  data-act="reject"  data-id="${it.id}">Reject</button>`
+                : ''
+                }
+            </div>
+        </div>
+       `;
+
+        const contentEl = card.querySelector('.content');
+            if (
+            contentEl &&
+            Array.isArray(it.media) &&
+            it.media.length &&
+            it.media[0] &&
+            it.media[0].url
+            ) {
+            const vid = document.createElement('video');
+            vid.src = it.media[0].url;
+            vid.controls = true;
+            vid.preload = 'metadata';
+            vid.style.width = '100%';
+            vid.style.marginTop = '8px';
+            vid.style.borderRadius = '12px';
+            contentEl.appendChild(vid);
+        }
+       cards.appendChild(card);
+     }
     }
+
     
     // --- loaders ---
     async function loadQueue(page = 1, limit = 20) {
-      setStatus('Loading queue…');
-      try {
-        const { data, headers } =
-          await api(`/api/v1/modqueue?page=${page}&limit=${limit}&t=${Date.now()}`);
-        updateRateLimit(headers);
-        renderItems(data.items, 'queue');
-        setStatus('Queue loaded', 'ok');
-      } catch (err) {
-        setStatus(err.message || String(err), 'err');
-      }
+        setStatus('Loading queue…');
+        const btn = document.getElementById('btn-refresh-queue');
+        busy(btn, true, 'Refreshing…');
+        try {
+            const { data, headers } =
+            await api(`/api/v1/modqueue?page=${page}&limit=${limit}&t=${Date.now()}`);
+            updateRateLimit(headers);
+
+            currentView  = 'queue';
+            currentPage  = page;
+            currentLimit = limit;
+            lastTotal    = data.total ?? (Array.isArray(data.items) ? data.items.length : 0);
+
+            renderItems(data.items, 'queue');
+            updatePager();
+            setStatus('Queue loaded', 'ok');
+        } catch (err) {
+            setStatus(err.message || String(err), 'err');
+        } finally {
+            busy(btn, false);
+        }
     }
-    
+
     async function loadAudit(page = 1, limit = 10) {
-      setStatus('Loading audit…');
-      try {
-        const { data, headers } =
-          await api(`/api/v1/audit?page=${page}&limit=${limit}&t=${Date.now()}`);
-        updateRateLimit(headers);
-        renderItems(data.items, 'audit');
-        setStatus('Audit loaded', 'ok');
-      } catch (err) {
-        setStatus(err.message || String(err), 'err');
-      }
+        setStatus('Loading audit…');
+        const btn = document.getElementById('btn-view-audit');
+        busy(btn, true, 'Loading…');
+        try {
+            const { data, headers } =
+            await api(`/api/v1/audit?page=${page}&limit=${limit}&t=${Date.now()}`);
+            updateRateLimit(headers);
+
+            currentView  = 'audit';
+            currentPage  = page;
+            currentLimit = limit;
+            lastTotal    = data.total ?? (Array.isArray(data.items) ? data.items.length : 0);
+
+            renderItems(data.items, 'audit');
+            updatePager();
+            setStatus('Audit loaded', 'ok');
+        } catch (err) {
+            setStatus(err.message || String(err), 'err');
+        } finally {
+            busy(btn, false);
+        }
     }
+
+    async function loadPosts(page = 1, limit = 20) {
+        setStatus('Loading posts…');
+        const btn = document.getElementById('btn-view-posts');
+        busy(btn, true, 'Loading…');
+        try {
+            const { data, headers } =
+            await api(`/api/v1/posts?page=${page}&limit=${limit}&t=${Date.now()}`);
+            updateRateLimit(headers);
+
+            currentView  = 'posts';
+            currentPage  = page;
+            currentLimit = limit;
+            lastTotal    = data.total ?? (Array.isArray(data.items) ? data.items.length : 0);
+
+            renderItems(data.items, 'posts');
+            updatePager();
+            setStatus('Posts loaded', 'ok');
+        } catch (err) {
+            setStatus(err.message || String(err), 'err');
+        } finally {
+            busy(btn, false);
+        }
+    }
+
     
     // --- one-time wiring ---
     document.addEventListener('DOMContentLoaded', () => {
@@ -194,9 +428,36 @@
       // buttons (support both id styles)
       const btnRefresh = document.getElementById('btn-refresh-queue') || document.getElementById('btnQueue');
       const btnAudit   = document.getElementById('btn-view-audit')    || document.getElementById('btnAudit');
+      const btnQueue = document.getElementById('btn-refresh-queue');
+      const btnPosts = document.getElementById('btn-view-posts');
+      const btnPrev  = document.getElementById('btn-prev');
+      const btnNext  = document.getElementById('btn-next');
     
       btnRefresh?.addEventListener('click', () => loadQueue());
-      btnAudit?.addEventListener('click',   () => loadAudit());
+      btnQueue?.addEventListener('click', () => {
+        currentView  = 'queue';
+        currentPage  = 1;
+        currentLimit = 20;
+        loadQueue(currentPage, currentLimit);
+      });
+
+      btnAudit?.addEventListener('click', () => {
+        currentView  = 'audit';
+        currentPage  = 1;
+        currentLimit = 10;
+        loadAudit(currentPage, currentLimit);
+      });
+
+      btnPosts?.addEventListener('click', () => {
+        currentView  = 'posts';
+        currentPage  = 1;
+        currentLimit = 20;
+        loadPosts(currentPage, currentLimit);
+      });
+
+    // pager
+      btnPrev?.addEventListener('click', goPrev);
+      btnNext?.addEventListener('click', goNext);
     
       // approve / reject (event delegation)
       document.getElementById('cards')?.addEventListener('click', async (e) => {
