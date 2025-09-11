@@ -1,69 +1,74 @@
+// src/models/posts.store.js
 const { randomUUID } = require('crypto');
+const { readJsonSync, writeJsonAtomicSync } = require('../utils/storefile');
 
-const MAX_POSTS = 1000; // keep newest 1000 in memory
+const FILE = 'posts.json';
+let posts = readJsonSync(FILE, []); // { id, personaId, content, tags, createdAt, media?[], status? }
 
-let posts = []; // { id, personaId, content, tags, createdAt, media?[] }
+function save() { writeJsonAtomicSync(FILE, posts); }
 
-function add({ personaId, content, tags = [] }) {
-    if (!personaId) throw new Error('personaId is required');
-    if (!content || typeof content !== 'string') throw new Error('content is required');
-    const post = {
-      id: randomUUID(),
-      personaId,
-      content: content.trim(),
-      tags,
-      createdAt: new Date().toISOString(),
-      media: [], // <-- optional, but nice to initialize
-    };
-    posts.unshift(post);
-    return post;
-}
+function add({ personaId, content, tags = [], status = 'queued', personaSnapshot = null }) {
+  if (!personaId) throw new Error('personaId is required');
+  if (!content || typeof content !== 'string') throw new Error('content is required');
 
-function list({ page = 1, limit = 10, personaId } = {}) {
-    const source = personaId ? posts.filter(p => p.personaId === personaId) : posts;
-    const start = (page - 1) * limit;
-    return {
-      page,
-      limit,
-      total: source.length,
-      items: source.slice(start, start + limit),
-    };
+  const post = {
+    id: randomUUID(),
+    personaId,
+    content: content.trim(),
+    tags,
+    status, // queued | review | posted (you already use queue/review in Admin)
+    personaSnapshot,
+    media: [],
+    createdAt: new Date().toISOString(),
+  };
+  posts.unshift(post);
+  save();
+  return post;
 }
 
 function get(id) {
-    return posts.find(p => p.id === id) || null;
+  return posts.find(p => p.id === id) || null;
+}
+
+function attachMedia(id, mediaItem) {
+  const post = get(id);
+  if (!post) return false;
+  post.media = post.media || [];
+  post.media.unshift(mediaItem); // newest first
+  save();
+  return true;
+}
+
+function setStatus(id, status) {
+  const post = get(id);
+  if (!post) return false;
+  post.status = status;
+  save();
+  return true;
+}
+
+function list({ page = 1, limit = 10, personaId, status } = {}) {
+  let src = posts;
+  if (personaId) src = src.filter(p => p.personaId === personaId);
+  if (status)    src = src.filter(p => p.status === status);
+
+  const start = (page - 1) * limit;
+  return {
+    page,
+    limit,
+    total: src.length,
+    items: src.slice(start, start + limit),
+  };
 }
 
 function remove(id) {
-    const i = posts.findIndex(p => p.id === id);
-    if (i === -1) return false;
-    posts.splice(i, 1);
-    return true;
+  const i = posts.findIndex(p => p.id === id);
+  if (i === -1) return false;
+  posts.splice(i, 1);
+  save();
+  return true;
 }
 
-function clear() { posts = []; }
+function clear() { posts = []; save(); }
 
-/**
- * Attach a media item (video/image) to a post.
- * @param {string} postId
- * @param {{ url:string, kind?:'video'|'image'|'gif', thumb?:string, meta?:object, id?:string }} media
- */
-
-function attachMedia(postId, media) {
-    const p = posts.find(x => x.id === postId);
-    if (!p) throw new Error('post not found');
-    const item = {
-      id: randomUUID(),
-      kind: media.kind || 'video',
-      type: media.type || 'video/mp4',
-      url: media.url,
-      thumb: media.thumb || null,
-      meta: media.meta || null,
-      createdAt: new Date().toISOString()
-    };
-    p.media ||= [];
-    p.media.unshift(item);
-    return item;
-  }  
-  
-  module.exports = { add, list, get, remove, clear, attachMedia };
+module.exports = { add, get, list, remove, clear, attachMedia, setStatus };

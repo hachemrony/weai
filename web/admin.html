@@ -37,6 +37,10 @@
     .err { color:var(--danger); }
     .divider { height:1px; background:#1f2937; margin:8px 0; }
 
+    /* lightweight inline spinner + disabled look */
+    .spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .btn-ghost[disabled], .btn[disabled]{opacity:.6;cursor:not-allowed}
   </style>
 </head>
 <body>
@@ -44,7 +48,16 @@
     <h1>WeAI – Moderation Admin</h1>
     <div class="pill">
       <span class="muted">Token</span>
+      <select id="providerSelect" class="ml-2 text-xs px-2 py-1 rounded bg-slate-800 text-slate-200">
+        <option value="">default</option>
+        <option value="mock">mock</option>
+        <option value="pika">pika</option>
+        <option value="comfy">comfy</option>
+      </select>      
       <input id="token" type="password" placeholder="x-admin-token..." />
+      <span id="provider-badge" class="ml-3 text-xs px-2 py-1 rounded-full bg-slate-700 text-slate-200">
+        provider: …
+      </span>      
       <button id="saveToken" class="small">Save</button>
       <span id="tokenState" class="muted">not set</span>
     </div>
@@ -68,35 +81,119 @@
   </main>
 
   <script>
+    // --- provider override (admin-only) ---
+    const providerSelect = document.getElementById('providerSelect');
+    if (providerSelect) {
+        // restore previous choice
+        const saved = localStorage.getItem('visual_provider_override') || '';
+        providerSelect.value = saved;
+        providerSelect.addEventListener('change', () => {
+            localStorage.setItem('visual_provider_override', providerSelect.value || '');
+        });
+    }
+
+    // helper: get current override value
+    function getProviderOverride() {
+        const el = document.getElementById('providerSelect');
+        const v = el ? (el.value || '') : '';
+        return v === 'default' ? '' : v; // optional nicety
+    }
+
     // Generate visual -> queue job, poll until done, then refresh the list
+
+
     document.addEventListener('click', async (e) => {
+        // --- Attach media flow ---
+    const attachBtn = e.target.closest('.btn-attach');
+    if (attachBtn) {
+        const postId = attachBtn.dataset.id;
+        if (!postId) return;
+
+        // quick inline UI – paste a public MP4 URL (or your /mock/ path)
+        const url = prompt('Paste a video URL (mp4) or a local /mock/ path:', '/mock/visuals/demo.mp4');
+        if (!url) return;
+
+        busyEl(attachBtn, true); // optional: if you use the busy helper
+        setStatus('Attaching...', 'ok');
+
+        try {
+        const r = await fetch(`/api/v1/posts/${postId}/media`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+            url,
+            provider: 'manual',
+            kind: 'video',
+            type: 'video/mp4'
+            })
+        });
+        if (!r.ok) throw new Error('Attach failed');
+        // refresh current view (same code path you use after generation)
+        if (currentView === 'queue')      await loadQueue(currentPage, currentLimit);
+        else if (currentView === 'audit') await loadAudit(currentPage, currentLimit);
+        else                              await loadPosts(currentPage, currentLimit);
+        setStatus('Attached!', 'ok');
+        } catch (err) {
+        console.warn(err);
+        setStatus('Attach failed', 'err');
+        alert('Attach failed. Check console/server logs.');
+        } finally {
+        busyEl(attachBtn, false);
+        }
+
+        return; // stop – we handled this click
+    }
         const btn = e.target.closest('.btn-visual');
         if (!btn) return;
 
         const postId = btn.dataset.id;
         if (!postId) return;
 
+        const card = btn.closest('.card');
+
+        // prevent double submits on same card
+        if (card && card.dataset.busy === '1') return;
+        if (card) card.dataset.busy = '1';
+
+        btn.disabled = true;
+        btn.dataset.old = btn.textContent;
+        btn.innerHTML = '<span class="spinner"></span> Queueing…';
+
         const reset = () => { btn.disabled = false; btn.textContent = 'Generate visual'; };
 
         btn.disabled = true;
         btn.textContent = 'Queuing…';
 
+
         try {
-            // 1) queue the job
-            const { data } = await api('/api/v1/visuals', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            const createRes = await fetch('/api/v1/visuals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                 postId,
                 mode: 'animate',
                 instruction: 'gentle camera pan, slight nod',
                 preset: 'pan',
                 durationSec: 4
-            })
+                })
             });
 
-            const jobId = data?.id || data?.jobId;
+            const createData = await createRes.json();
+            const jobId = createData?.id || createData?.jobId;
             if (!jobId) throw new Error('No job id returned');
+
+            // --- 2) UI CUES (after job was created successfully) ---
+
+            btn.innerHTML = '<span class="spinner"></span> Generating…';
+            const notice = document.getElementById('status');
+            if (notice) { notice.textContent = 'Generating visual…'; notice.classList.add('ok'); notice.classList.remove('err'); }
+
+            // include admin token if you already do elsewhere
+            const headers = {};
+            const token = document.getElementById('token')?.value?.trim();
+            if (token) headers['x-admin-token'] = token;
+            const override = getProviderOverride();
+            if (override) headers['x-visual-provider'] = override;
 
             // 2) poll status
             btn.textContent = 'Generating…';
@@ -108,19 +205,33 @@
             return poll();
             };
 
-            await poll();
+            await (async function poll() {
+            while (true) {
+                const r = await fetch(`/api/v1/visuals/${jobId}`, { headers });
+                const j = await r.json();
+                if (j.status === 'finished') return;
+                if (j.status === 'failed') throw new Error('Generation failed');
+                await new Promise(r => setTimeout(r, 1200));
+            }
+            })();
 
             // 3) refresh the current view (the worker attached media to the post)
             btn.textContent = 'Refreshing…';
-            if (currentView === 'queue')       await loadQueue(currentPage, currentLimit);
-            else if (currentView === 'audit')  await loadAudit(currentPage, currentLimit);
+            if (currentView === 'queue')      await loadQueue(currentPage, currentLimit);
+            else if (currentView === 'audit') await loadAudit(currentPage, currentLimit);
             else                               await loadPosts(currentPage, currentLimit);
 
         } catch (err) {
             setStatus(err.message || String(err), 'err');
+            
+        if (notice) notice.textContent = 'Ready.';
+
         } finally {
             reset();
-        }
+            if (card) card.dataset.busy = '0';
+            btn.disabled = false;
+            btn.textContent = btn.dataset.old || 'Generate visual';
+        }   
     });
 
     // --- tiny helpers ---
@@ -184,6 +295,30 @@
         if (currentView === 'audit') return loadAudit(p, currentLimit);
         return loadPosts(p, currentLimit); // if you have posts view
     }
+    async function paintProviderHealth() {
+        try {
+            const r = await fetch('/api/v1/visuals/health');
+            const { name, fallback, ready } = await r.json();
+            const notice = document.getElementById('status'); // you already have .notice styles
+
+            if (!ready && fallback === 'mock') {
+            notice.classList.remove('ok');
+            notice.classList.add('err');
+            notice.textContent = `Provider ${name} not configured — using mock fallback.`;
+            } else {
+            notice.classList.remove('err');
+            notice.classList.add('ok');
+            notice.textContent = `Ready. Provider: ${name}${fallback ? ` (fallback: ${fallback})` : ''}.`;
+            }
+
+        } catch (e) {
+            // don’t crash UI; leave existing text
+            console.warn('health banner error', e);
+        }
+    }
+
+    // call on load (alongside your paintProviderBadge)
+    paintProviderHealth();
 
     document.getElementById('btn-seed')?.addEventListener('click', async () => {
         const btn = document.getElementById('btn-seed');
@@ -302,6 +437,7 @@
             </div>
             <div class="right">
                 <button type="button" class="small btn-visual" data-id="${it.id}">Generate visual</button>
+                <button type="button" class="small btn-attach" data-id="${it.id}">Attach media</button>
                 ${mode === 'queue'
                 ? `<button type="button" class="approve" data-act="approve" data-id="${it.id}">Approve</button>
                     <button type="button" class="reject"  data-act="reject"  data-id="${it.id}">Reject</button>`
@@ -310,6 +446,29 @@
             </div>
         </div>
        `;
+
+        // --- provider pill ---
+        const media     = (it.media && it.media[0]) || null;
+        const provider  = (media && media.provider) || 'none';
+
+        const pillClass =
+            provider === 'mock'  ? 'bg-gray-700'   :
+            provider === 'pika'  ? 'bg-purple-700' :
+            provider === 'comfy' ? 'bg-emerald-700':
+                                    'bg-slate-700';
+
+        const providerRow = document.createElement('div');
+        providerRow.className = 'mt-2 text-xs text-slate-300';
+        providerRow.innerHTML = `
+            provider:
+            <span class="inline-block px-2 py-0.5 rounded-full ${pillClass}">
+                ${provider}
+            </span>
+        `;
+
+        // put the pill at the top of the card body
+        (card.querySelector('.content') || card).prepend(providerRow);
+
 
         const contentEl = card.querySelector('.content');
             if (
@@ -357,6 +516,7 @@
             busy(btn, false);
         }
     }
+    
 
     async function loadAudit(page = 1, limit = 10) {
         setStatus('Loading audit…');
@@ -406,7 +566,30 @@
         }
     }
 
-    
+    async function paintProviderBadge() {
+        try {
+            const r = await fetch('/api/v1/visuals/provider');
+            const { name, fallback } = await r.json();
+
+            const el = document.getElementById('provider-badge');
+            if (!el) return;
+
+            el.textContent = fallback
+            ? `provider: ${name} (mock fallback)`
+            : `provider: ${name}`;
+
+            // quick styling cue
+            el.classList.remove('bg-slate-700','bg-amber-700','bg-emerald-700');
+            el.classList.add(fallback ? 'bg-amber-700' : 'bg-emerald-700');
+        } catch (e) {
+            // best-effort: leave the default
+            console.warn('provider badge error', e);
+        }
+    }
+
+    // call on load
+    paintProviderBadge();
+
     // --- one-time wiring ---
     document.addEventListener('DOMContentLoaded', () => {
       // token field + save

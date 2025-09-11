@@ -11,6 +11,13 @@ const express = require('express');
 const cors = require('cors');
 const healthRouter = require('./routes/health');
 const config = require('./utils/config');
+
+const viewerId = require('./middleware/viewerId');
+const app = express();
+
+const meRouter = require('./routes/me');
+app.use('/api/v1/me', meRouter);
+
 const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
 const personasRouter = require('./routes/personas');
@@ -26,9 +33,14 @@ const adminAuth = require('./utils/adminAuth');
 const auditRouter = require('./routes/audit');
 const visualsRouter = require('./routes/visuals');
 const { startVisualsWorker } = require('./workers/visuals.worker');
+const { getVisualProviderName } = require('./services/visualProviders');
+console.log('[boot] visual provider:', getVisualProviderName());
+
+if ((process.env.VISUAL_PROVIDER || process.env.VIDEO_PROVIDER) === 'pika' && !process.env.PIKA_API_KEY) {
+  console.warn('[boot] VISUAL_PROVIDER=pika but PIKA_API_KEY is not set. Using local mock data if the provider errors.');
+}
 
 
-const app = express();
 const PORT = config.port;
 
 const WEB_DIR = path.resolve(__dirname, '../web');
@@ -36,6 +48,7 @@ app.use(express.static(WEB_DIR));
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(viewerId);
 app.use(logger); 
 
 app.get('/admin', (_req, res) => {

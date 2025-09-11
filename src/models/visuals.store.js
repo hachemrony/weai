@@ -1,37 +1,57 @@
 // src/models/visuals.store.js
 const { randomUUID } = require('crypto');
+const { readJsonSync, writeJsonAtomicSync } = require('../utils/storefile');
 
-const JOBS = []; // { id, postId, mode, instruction, imageUrl, preset, durationSec, status, createdAt, updatedAt, result?, error? }
+const FILE = 'jobs.json';
+let jobs = readJsonSync(FILE, []); // array of job objects
+function save() { writeJsonAtomicSync(FILE, jobs); }
 
-function create({ postId, mode, instruction = '', imageUrl = '', preset = '', durationSec = 4 }) {
+function create(postId, mode, instruction = '', imageUrl = '', preset = '', durationSec = 4) {
   const job = {
     id: randomUUID(),
     postId,
-    mode,                 // 'image_edit' | 'animate' | 'text2video'
+    mode,
     instruction,
     imageUrl,
     preset,
     durationSec,
-    status: 'queued',     // 'queued' | 'processing' | 'finished' | 'failed'
+    status: 'queued',        // queued | processing | finished | failed
+    error: null,
+    media: null,             // { url, provider, kind, type }
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    result: null,
-    error: null,
+    provider: null,
   };
-  JOBS.unshift(job);
+  jobs.unshift(job);
+  save();
   return job;
 }
 
-function get(id)           { return JOBS.find(j => j.id === id) || null; }
-function list({ page=1, limit=20 } = {}) {
-  const start = (page - 1) * limit;
-  return { page, limit, total: JOBS.length, items: JOBS.slice(start, start + limit) };
+function get(id) {
+  return jobs.find(j => j.id === id) || null;
 }
+
 function update(id, patch) {
-  const j = get(id); if (!j) return null;
+  const j = get(id);
+  if (!j) return null;
   Object.assign(j, patch, { updatedAt: new Date().toISOString() });
+  save();
   return j;
 }
-function nextQueued()      { return JOBS.find(j => j.status === 'queued'); }
 
-module.exports = { create, get, list, update, nextQueued, _data: JOBS };
+function list({ page = 1, limit = 20, status } = {}) {
+  let src = jobs;
+  if (status) src = src.filter(j => j.status === status);
+  const start = (page - 1) * limit;
+  return { page, limit, total: src.length, items: src.slice(start, start + limit) };
+}
+
+function clear() { jobs = []; save(); }
+
+function nextQueued() {
+    const { items } = list(1, 1, 'queued');   // reuse your list() with status filter
+    return items[0] || null;                  // worker will mark it processing
+  }
+  
+  
+module.exports = { create, get, update, list, clear, nextQueued };
