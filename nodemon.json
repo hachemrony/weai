@@ -1,0 +1,5 @@
+{
+  "watch": ["src"],
+  "ignore": ["README.md", "*.sh", "scripts/*", "data/*.json"],
+  "ext": "js,json"
+}

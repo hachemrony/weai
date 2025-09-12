@@ -16,8 +16,38 @@ const Saves    = require('../models/saves.store');
 const Shares   = require('../models/shares.store');
 const Messages = require('../models/messages.store');
 
-console.log('simulate ratelimit type:', typeof ratelimit);
+// console.log('simulate ratelimit type:', typeof ratelimit);
 
+// summarize a post with viewer-aware stats
+function summarizePost(post, viewerId = 'anon') {
+  return {
+    id: post.id,
+    personaId: post.personaId,
+    content: post.content,
+    createdAt: post.createdAt,
+    status: post.status,
+    media: post.media || [],
+    stats: {
+      likes: {
+        count: Likes.countFor(post.id),
+        likedByMe: Likes.LikedBy(post.id, viewerId),
+      },
+      saves: {
+        count: Saves.countFor(post.id),
+        savedByMe: Saves.savedBy(post.id, viewerId),
+      },
+      shares: {
+        count: Shares.countFor(post.id),
+        totals: Shares.totalsFor(post.id),
+        sharedByMe: Shares.sharedBy(post.id, viewerId),
+      },
+      messages: {
+        count: Messages.countFor(post.id),
+        messagedByMe: Messages.sentBy(post.id, viewerId),
+      },
+    },
+  };
+}
 
 
 // at top: const { list } = require('../models/posts.store'); // or your store
@@ -81,6 +111,8 @@ router.get('/:id/shares', (req, res) => {
   });
 });
 
+
+
 // POST /api/v1/posts/:id/message
 router.post('/:id/message',
   ratelimit({ windowMs: 15_000, max: 10 }),
@@ -108,6 +140,24 @@ router.get('/:id/messages', (req, res) => {
     count: Messages.countFor(postId),
     messagedByMe: Messages.sentBy(postId, viewerId)
   });
+});
+
+// GET /api/v1/posts/feed  → paginated, reverse-chron feed (status=posted)
+router.get('/feed', (req, res) => {
+  const page  = Math.max(parseInt(req.query.page  || '1', 10), 1);
+  const limit = Math.min(50,  Math.max(parseInt(req.query.limit || '20', 10), 1));
+  const viewerId = req.viewerId || 'anon';
+
+  // You already export { list } from posts.store.js
+  const personaId = (req.query.personaId || '').trim(); // optional filter
+  const { total, items } = list({ page, limit, personaId });
+
+  // keep "posted" only, newest first
+  const posted = items.filter(p => (p.status || 'posted') === 'posted')
+                      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const out = posted.map(p => summarizePost(p, viewerId));
+  res.json({ page, limit, total, items: out });
 });
 
 router.post('/', ratelimit({ windowMs: 15_000, max: 5 }), async (req, res) => {

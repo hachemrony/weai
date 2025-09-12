@@ -8,23 +8,39 @@ if (!process.env.ADMIN_API_TOKEN && process.env.NODE_ENV !== 'production') {
 
 
 const express = require('express');
-const cors = require('cors');
-const healthRouter = require('./routes/health');
-const config = require('./utils/config');
-
-const viewerId = require('./middleware/viewerId');
 const app = express();
+
+app.head('/api/v1/health', (_req, res) => res.sendStatus(200)); // no body
+app.get('/api/v1/health',  (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+app.use((req, res, next) => {
+  console.log('[REQ]', req.method, req.url);
+  next();
+});
+// const healthRouter = require('./routes/health');
+// app.use('/api/v1/health', healthRouter);   // mount first, before other middleware
+
+const corsOptions = require('./utils/corsOptions');
+const viewerId = require('./middleware/viewerId');
+const logger = require('./utils/logger');
+// app.use(require('cors')(corsOptions));
+app.use(express.json());
+
+// app.use(viewerId);
+app.use(logger); 
+
+
+const cors = require('cors');
+const config = require('./utils/config');
 
 const meRouter = require('./routes/me');
 app.use('/api/v1/me', meRouter);
 
-const logger = require('./utils/logger');
 const dbRouter = require('./routes/db');
 const personasRouter = require('./routes/personas');
 const { loadExamples } = require('./models/personas.store');
 const postsRouter = require('./routes/posts');
 const simulateRouter = require('./routes/simulate');
-const corsOptions = require('./utils/corsOptions');
 const generateRouter = require('./routes/generate');
 const diagRouter = require('./routes/diag');
 const HOST = process.env.HOST || '127.0.0.1';
@@ -32,7 +48,6 @@ const modqueueRouter = require('./routes/modqueue');
 const adminAuth = require('./utils/adminAuth');
 const auditRouter = require('./routes/audit');
 const visualsRouter = require('./routes/visuals');
-const { startVisualsWorker } = require('./workers/visuals.worker');
 const { getVisualProviderName } = require('./services/visualProviders');
 console.log('[boot] visual provider:', getVisualProviderName());
 
@@ -41,15 +56,13 @@ if ((process.env.VISUAL_PROVIDER || process.env.VIDEO_PROVIDER) === 'pika' && !p
 }
 
 
-const PORT = config.port;
+const PORT = parseInt(process.env.PORT || '13080', 10);
 
 const WEB_DIR = path.resolve(__dirname, '../web');
 app.use(express.static(WEB_DIR));
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(viewerId);
-app.use(logger); 
+
 
 app.get('/admin', (_req, res) => {
   res.sendFile(path.join(WEB_DIR, 'admin.html'));
@@ -70,12 +83,40 @@ app.use('/api/v1/audit', adminAuth, auditRouter);
 app.use(express.static(path.resolve(__dirname, 'web')));
 app.use('/api/v1/visuals', visualsRouter);
 app.use('/mock', express.static(path.resolve(__dirname, '..', 'mock')));
+app.use(express.json());
+app.use(viewerId);
+app.use(logger);
 
 
-app.use('/api/v1/health', healthRouter);
 loadExamples();
 
-startVisualsWorker();
-app.listen(PORT, HOST, () => { 
-  console.log(`API listening on http://${HOST}:${PORT} (${config.nodeEnv})`);
+// --- boot logs so we KNOW what it's binding to ---
+console.log('[boot] HOST=%s PORT=%s NODE_ENV=%s', HOST, PORT, config.nodeEnv);
+
+// normalize worker import once
+const W = require('./workers/visuals.worker');
+const startVisualsWorker = W.startVisualsWorker || W;
+
+// ...
+console.log('[boot] ENV', { HOST: process.env.HOST, PORT: process.env.PORT, NODE_ENV: process.env.NODE_ENV });
+
+const server = app.listen(PORT, HOST);
+
+server.once('listening', () => {
+  const a = server.address(); // can be object | string | null
+  let where = `${HOST}:${PORT}`;
+  if (a && typeof a === 'object') where = `${a.address}:${a.port}`;
+  else if (typeof a === 'string') where = a;
+
+  console.log(`[boot] API Listening at http://${where} (${process.env.NODE_ENV || 'development'})`);
+
+  try { startVisualsWorker?.(); } catch (e) {
+    console.error('[boot] worker start failed:', e);
+  }
 });
+
+server.on('error', (err) => {
+  console.error('[boot] listen error:', err);
+  process.exit(1);
+});
+
