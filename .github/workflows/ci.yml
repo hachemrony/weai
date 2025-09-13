@@ -1,31 +1,53 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
 
 jobs:
   node:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 10
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - run: npm ci
-      - run: npm run lint
+      - name: Install deps
+        run: npm ci
 
-      # Ensure script has exec bit (belt & suspenders)
-      - run: chmod +x scripts/smoke.sh
-
-      # Start API in the background for smoke tests
       - name: Start server
         run: |
-          HOST=127.0.0.1 PORT=13080 NODE_ENV=development \
           node src/server.js &
+          echo $! > .server_pid
+        env:
+          HOST: 127.0.0.1
+          PORT: 13800
+          NODE_ENV: development
 
-      # Optional: wait a moment (or swap for a health check loop)
-      - run: sleep 1
+      - name: Wait for server (healthcheck)
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:13800/api/v1/health >/dev/null; then
+              echo "Server is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Server never became healthy"; exit 1
 
-      - name: Run smoke test
+      - name: Smoke tests
         run: npm run smoke
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Stop server
+        if: always()
+        run: |
+          kill -9 "$(cat .server_pid)" 2>/dev/null || true
