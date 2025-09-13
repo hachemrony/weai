@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
   pull_request:
@@ -8,7 +7,6 @@ jobs:
   node:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,50 +17,47 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
-      - name: Install jq (for smoke script)
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Create .env
+      - name: Start server (background)
+        env:
+          HOST: 127.0.0.1
+          PORT: 13880
+          NODE_ENV: development
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
         run: |
-          cat > .env <<'EOF'
-          HOST=127.0.0.1
-          PORT=13800
-          NODE_ENV=development
-          EOF
-
-      - name: Start server
-        run: |
-          nohup npm run start > /tmp/server.log 2>&1 &
-          echo $! > /tmp/server.pid
-          sleep 1
-          echo "Server PID: $(cat /tmp/server.pid)"
+          node src/server.js > server.log 2>&1 &
+          echo $! > server.pid
+          echo "PID=$(cat server.pid)"
 
       - name: Wait for health
         run: |
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:13800/api/v1/health >/dev/null; then
-              echo "Health OK"
-              exit 0
+          for i in {1..40}; do
+            if curl -fsS "http://127.0.0.1:13880/api/v1/health" >/dev/null; then
+              echo "healthy"; break
             fi
-            echo "Waiting for server... ($i)"
-            sleep 1
+            sleep 0.5
           done
-          echo "Server did not become healthy in time."
-          echo "---- server.log (tail) ----"
-          tail -n 200 /tmp/server.log
-          exit 1
+          # one last assert
+          curl -fsS "http://127.0.0.1:13880/api/v1/health"
 
-      - name: Smoke
-        run: npm run smoke
+      - name: Smoke test
+        run: bash scripts/smoke.sh
 
       - name: Lint
         run: npm run lint
 
-      - name: Always show server log tail
+      - name: Show server log (always)
         if: always()
         run: |
-          echo "---- server.log (tail) ----"
-          tail -n 200 /tmp/server.log || true
+          echo "----- server.log -----"
+          tail -n +1 server.log || true
+
+      - name: Stop server (always)
+        if: always()
+        run: |
+          kill "$(cat server.pid)" 2>/dev/null || true
