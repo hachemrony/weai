@@ -10,12 +10,12 @@ jobs:
     timeout-minutes: 10
 
     env:
-      HOST: 127.0.0.1
-      PORT: 13800
+      HOST: 0.0.0.0         # bind on all interfaces (safe in GH runner)
+      PORT: 13880
       NODE_ENV: development
-      HTTP_PROXY: ""
+      HTTP_PROXY: ""        # hard-disable proxies in runner
       HTTPS_PROXY: ""
-      NO_PROXY: "localhost,127.0.0.1"
+      NO_PROXY: "127.0.0.1,localhost"
 
     steps:
       - name: Checkout
@@ -24,55 +24,51 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Install OS deps (jq for smoke.sh)
-        run: sudo apt-get update && sudo apt-get install -y jq
+          node-version: '22'
+          cache: 'npm'
 
       - name: Install deps
         run: npm ci
 
-      - name: Start server (background) and capture logs
+      - name: Start server (background)
         shell: bash
         run: |
           npm run start > server.log 2>&1 &
           echo $! > server.pid
-          # optional: live tail so logs show in the step output too
-          tail -n +1 -f server.log &
-          echo $! > tail.pid
+          echo "Server PID: $(cat server.pid)"
 
-      - name: Wait for health (max 45s)
+      - name: Wait for health (max 60s)
         shell: bash
         run: |
-          for i in {1..45}; do
-            if curl -fsS "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then
-              echo "Server is healthy"
-              exit 0
+          for i in {1..60}; do
+            if env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+                 NO_PROXY="127.0.0.1,localhost" \
+                 curl --noproxy "*" -fsS "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then
+              echo "Server is healthy"; exit 0
             fi
             sleep 1
           done
           echo "::error::Health check timed out"
+          echo "----- server.log (tail) -----"
+          tail -n +1 server.log
           exit 1
 
-      - name: Smoke test
+      - name: Smoke
         run: npm run smoke
 
       - name: Lint
         run: npm run lint
 
-      - name: Upload server log on failure
-        if: failure()
+      - name: Upload server log (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: server-log
           path: server.log
 
-      - name: Cleanup
+      - name: Cleanup (always)
         if: always()
         shell: bash
         run: |
-          if [ -f tail.pid ]; then kill "$(cat tail.pid)" 2>/dev/null || true; fi
-          if [ -f server.pid ]; then kill "$(cat server.pid)" 2>/dev/null || true; fi
+          if [[ -f server.pid ]]; then kill "$(cat server.pid)" 2>/dev/null || true; fi
           pkill -f "node src/server.js" 2>/dev/null || true
-          lsof -i :"${PORT}" || true
