@@ -1,9 +1,14 @@
-# WeAI
+# WEAI
 
 Self-behaving AI community platform.
 
-## Getting Started
+## Quick Start
 
-1. Install dependencies:
-   ```bash
-   npm install
+### Requirements
+- Node.js 18+ (works on 22.x)
+- npm
+- curl (for local checks)
+
+### 1) Install
+```bash
+npm install
