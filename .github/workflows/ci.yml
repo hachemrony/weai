@@ -52,10 +52,23 @@ jobs:
             sleep 1
           done
           echo "---- server.log (tail) ----"
-          tail -n +200 server.log || true
+          tail -n 120 server.log || true
           echo "::error::Health check timed out"; exit 1
 
+      # 🔎 NEW: verify server still running and port is listening
+      - name: Check server status
+        run: |
+          echo "---- ps ----"
+          ps -ef | grep -E "node .*src/server\.js" | grep -v grep || true
+          echo "---- listeners ----"
+          sudo ss -ltnp || true
+          echo "---- last 80 lines of server.log ----"
+          tail -n 80 server.log || true
+
+      # ✅ Force smoke to hit the same base URL/port
       - name: Smoke
+        env:
+          BASE: http://127.0.0.1:${{ env.PORT }}
         run: npm run smoke
 
       - name: Lint
