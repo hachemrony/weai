@@ -12,7 +12,11 @@ jobs:
       HOST: 127.0.0.1
       PORT: 13800
       NODE_ENV: development
-      NO_PROXY: 'localhost,127.0.0.1,::1'
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # <-- must exist in repo Settings → Actions → Secrets
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: "localhost,127.0.0.1,::1"
+      SKIP_MODERATION: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
