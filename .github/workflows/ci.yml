@@ -21,9 +21,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-+defaults:
-+  run:
-+    shell: bash
+defaults:
+  run:
+   shell: bash
 
 jobs:
   node:
@@ -53,9 +53,9 @@ jobs:
 
       # Only write OPENAI_API_KEY into the environment if it actually exists
       - name: Export OpenAI key (if present)
-        # Secrets don't flow to forks; skip on forked PRs
-        if: env.HAS_OPENAI == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+        if: env.HAS_OPENAI == 'true' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork)
         run: echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_ENV"
+
 
       - name: Install deps
         run: npm ci
@@ -77,7 +77,7 @@ jobs:
         run: |
           for i in $(seq 1 90); do
             if curl -fsS --retry 5 --retry-connrefused --retry-delay 0 --max-time 1 \
-              "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then
+             "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then 
               echo "Server is healthy"; exit 0
             fi
             sleep 1
