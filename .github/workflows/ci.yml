@@ -2,7 +2,17 @@ name: CI
 
 on:
   push:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "package*.json"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "package*.json"
+      - ".github/workflows/ci.yml"
 
 # Quick hardening
 permissions:
@@ -10,6 +20,10 @@ permissions:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
++defaults:
++  run:
++    shell: bash
 
 jobs:
   node:
@@ -39,7 +53,8 @@ jobs:
 
       # Only write OPENAI_API_KEY into the environment if it actually exists
       - name: Export OpenAI key (if present)
-        if: env.HAS_OPENAI == 'true'
+        # Secrets don't flow to forks; skip on forked PRs
+        if: env.HAS_OPENAI == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
         run: echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_ENV"
 
       - name: Install deps
@@ -61,7 +76,8 @@ jobs:
       - name: Wait for health (max 90s)
         run: |
           for i in $(seq 1 90); do
-            if curl -fsS --max-time 1 "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then
+            if curl -fsS --retry 5 --retry-connrefused --retry-delay 0 --max-time 1 \
+              "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null; then
               echo "Server is healthy"; exit 0
             fi
             sleep 1
