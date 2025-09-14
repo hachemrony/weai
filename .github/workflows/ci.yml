@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+# Quick hardening
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   node:
     runs-on: ubuntu-latest
@@ -12,11 +19,13 @@ jobs:
       HOST: 127.0.0.1
       PORT: 13800
       NODE_ENV: development
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # keep proxies empty so localhost calls aren’t intercepted
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       NO_PROXY: "localhost,127.0.0.1,::1"
       SKIP_MODERATION: "1"
+      # boolean flag so we can skip smoke if there is no key
+      HAS_OPENAI: ${{ secrets.OPENAI_API_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -26,7 +35,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: 'npm'
+
+      # Only write OPENAI_API_KEY into the environment if it actually exists
+      - name: Export OpenAI key (if present)
+        if: env.HAS_OPENAI == 'true'
+        run: echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_ENV"
 
       - name: Install deps
         run: npm ci
@@ -38,6 +52,7 @@ jobs:
 
       - name: Start server (background)
         run: |
+          # make sure no proxies interfere with localhost
           unset http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY ALL_PROXY all_proxy
           nohup npm run start > server.log 2>&1 &
           echo $! > server.pid
@@ -55,37 +70,37 @@ jobs:
           tail -n 120 server.log || true
           echo "::error::Health check timed out"; exit 1
 
-      # 🔎 NEW: verify server still running and port is listening
+      # Extra sanity: verify process & port listeners
       - name: Check server status
         run: |
           echo "---- ps ----"
-          ps -ef | grep -E "node .*src/server\.js" | grep -v grep || true
+          ps -ef | grep -E "node .*src/server.js" | grep -v grep || true
           echo "---- listeners ----"
           sudo ss -ltnp || true
           echo "---- last 80 lines of server.log ----"
           tail -n 80 server.log || true
 
-      # ✅ Force smoke to hit the same base URL/port
+      # Only run smoke when an OPENAI key is present
       - name: Smoke
-        env:
-          BASE: http://127.0.0.1:${{ env.PORT }}
+        if: env.HAS_OPENAI == 'true'
         run: npm run smoke
 
       - name: Lint
         run: npm run lint
 
-      - name: Upload server.log (always)
-        if: always()
+      - name: Upload server.log (on failure)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: server-log
           path: server.log
+          if-no-files-found: ignore
 
       - name: Stop server (always)
         if: always()
         run: |
           if [ -f server.pid ]; then
-            kill -TERM "$(cat server.pid)" 2>/dev/null || true
+            kill -TERM "$(cat server.pid)" >/dev/null || true
             sleep 2
-            kill -KILL "$(cat server.pid)" 2>/dev/null || true
+            kill -KILL "$(cat server.pid)" >/dev/null || true
           fi
