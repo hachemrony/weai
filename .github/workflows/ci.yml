@@ -70,15 +70,36 @@ jobs:
           tail -n 120 server.log || true
           echo "::error::Health check timed out"; exit 1
 
-      # Extra sanity: verify process & port listeners
-      - name: Check server status
+      - name: Pin BASE for smoke
+        run: echo "BASE=http://127.0.0.1:${PORT}" >> "$GITHUB_ENV"
+
+      - name: Ensure server still alive
         run: |
-          echo "---- ps ----"
+          if [ -f server.pid ]; then
+            if ! kill -0 "$(cat server.pid)" 2>/dev/null; then
+              echo "::error::Server process exited"
+              tail -n 200 server.log || true
+              exit 1
+            fi
+          fi
+          # Confirm the port is listening
+          sudo ss -ltnp | grep ":${PORT}" || {
+            echo "::error::Port ${PORT} not listening"
+            tail -n 200 server.log || true
+            exit 1
+          }
+
+
+     # Extra sanity: only dump status if something failed above
+      - name: Check server status (on failure)
+        if: failure()
+        run: |
+          echo "——— ps ——"
           ps -ef | grep -E "node .*src/server.js" | grep -v grep || true
-          echo "---- listeners ----"
+          echo "——— listeners ——"
           sudo ss -ltnp || true
-          echo "---- last 80 lines of server.log ----"
-          tail -n 80 server.log || true
+          echo "——— last 200 lines of server.log ——"
+          tail -n 200 server.log || true
 
       # Only run smoke when an OPENAI key is present
       - name: Smoke
