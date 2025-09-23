@@ -8,3 +8,17 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# generated videos
+src/visuals/*.mp4
+
+
+# smoke artifacts
+docs/smoke-run-*.log
+visuals/*.mp4
+
+# smoke artifacts
+src/vis/**/*.mp4
+
+# keep Seedance provider tracked
+!src/services/seedance.js
