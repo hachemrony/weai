@@ -16,3 +16,9 @@ src/visuals/*.mp4
 # smoke artifacts
 docs/smoke-run-*.log
 visuals/*.mp4
+
+# smoke artifacts
+src/vis/**/*.mp4
+
+# keep Seedance provider tracked
+!src/services/seedance.js
