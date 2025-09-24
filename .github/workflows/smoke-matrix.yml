@@ -26,6 +26,11 @@ jobs:
           HOST: 127.0.0.1
           PORT: 3000
           NODE_ENV: test
+          # keep the server happy even if we never call OpenAI
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ENABLE: "false"
+          MOD_ENABLE: "false"
+
         run: node src/server.js > server.log 2>&1 & echo $! > server.pid
 
       - name: Wait for port
@@ -68,6 +73,11 @@ jobs:
           HOST: 127.0.0.1
           PORT: 3000
           NODE_ENV: test
+          # keep the server happy even if we never call OpenAI
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ENABLE: "false"
+          MOD_ENABLE: "false"
+
         run: node src/server.js > server.log 2>&1 & echo $! > server.pid
       - name: Wait for port
         run: npx --yes wait-on@7 -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
@@ -87,3 +97,4 @@ jobs:
           path: |
             server.log
             docs/smoke-*.log
+
