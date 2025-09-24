@@ -1,0 +1,62 @@
+name: Smoke (mock)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Make smoke script executable
+        run: chmod +x scripts/smoke-visuals-both.sh
+
+      - name: Start server (mock)
+        run: node src/server.js & echo $! > server.pid
+        env:
+          HOST: 127.0.0.1
+          PORT: 3000
+          NODE_ENV: test
+          VISUAL_PROVIDER: mock
+
+      - name: Wait for port
+        run: |
+          npx wait-on -t 10000 tcp:127.0.0.1:3000 || { cat server.pid && exit 1; }
+
+      - name: Smoke (both=mock+mock)
+        env:
+          BASE: http://127.0.0.1:3000/api/v1
+        run: |
+          bash scripts/smoke-visuals-both.sh > docs/smoke-run-$(date +%Y%m%d-%H%M%S).log
+
+      - name: Stop server
+        if: always()
+        run: kill -9 $(cat server.pid) || true
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-artifacts
+          if-no-files-found: ignore
+          path: |
+            docs/smoke-run-*.log
+            src/visuals/*.mp4

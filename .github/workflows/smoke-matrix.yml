@@ -1,0 +1,72 @@
+name: Smoke (providers)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *"  # daily 9:00 UTC (optional)
+
+jobs:
+  seedream4:
+    if: ${{ secrets.SEEDREAM_API_BASE != '' && secrets.SEEDREAM_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: chmod +x scripts/smoke-visuals-both.sh
+      - name: Start server
+        run: node src/server.js & echo $! > server.pid
+        env:
+          HOST: 127.0.0.1
+          PORT: 3000
+          NODE_ENV: test
+      - name: Wait for port
+        run: npx wait-on -t 15000 tcp:127.0.0.1:3000
+      - name: Smoke (seedream4)
+        env:
+          BASE: http://127.0.0.1:3000/api/v1
+          SEEDREAM_API_BASE: ${{ secrets.SEEDREAM_API_BASE }}
+          SEEDREAM_API_KEY:  ${{ secrets.SEEDREAM_API_KEY }}
+          VISUAL_PROVIDER: seedream4
+        run: bash scripts/smoke-visuals-both.sh > docs/smoke-seedream4.log
+      - name: Stop server
+        if: always()
+        run: kill -9 $(cat server.pid) || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-seedream4
+          path: |
+            docs/smoke-seedream4.log
+            src/visuals/*.mp4
+
+  nanobanana:
+    if: ${{ secrets.NANOBANANA_API_URL != '' && secrets.NANOBANANA_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    steps:  # identical to above, but env keys + VISUAL_PROVIDER=nanobanana
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: chmod +x scripts/smoke-visuals-both.sh
+      - run: node src/server.js & echo $! > server.pid
+        env: { HOST: 127.0.0.1, PORT: 3000, NODE_ENV: test }
+      - run: npx wait-on -t 15000 tcp:127.0.0.1:3000
+      - name: Smoke (nanobanana)
+        env:
+          BASE: http://127.0.0.1:3000/api/v1
+          NANOBANANA_API_URL: ${{ secrets.NANOBANANA_API_URL }}
+          NANOBANANA_API_KEY: ${{ secrets.NANOBANANA_API_KEY }}
+          VISUAL_PROVIDER: nanobanana
+        run: bash scripts/smoke-visuals-both.sh > docs/smoke-nanobanana.log
+      - if: always()
+        run: kill -9 $(cat server.pid) || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-nanobanana
+          path: |
+            docs/smoke-nanobanana.log
+            src/visuals/*.mp4
