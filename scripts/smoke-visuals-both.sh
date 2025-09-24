@@ -103,27 +103,33 @@ doneCount=0
 failCount=0
 total="${#JOB_IDS[@]}"
 
+if [[ "${VISUAL_PROVIDER:-}" == "mock" || "${PROV:-}" == "mock" ]]; then
+  echo "[mock] queued ${#JOB_IDS[@]} job(s); skipping poll (no worker in CI)"
+  exit 0
+fi
+
+
 echo "[4/5] Poll jobs"
-declare -i doneCount=0 failCount=0 pending=0
-declare -i deadline=$(( SECONDS + 180 ))   # 3 minutes max
+
+# make sure they're defined before any arithmetic
+declare -i doneCount=0
+declare -i failCount=0
+declare -i pending=0
+declare -i deadline=$(( SECONDS + 180 ))  # 3 minutes max
 
 while (( SECONDS <= deadline )); do
   doneCount=0
   failCount=0
   pending=0
-
-  # poll each job
-  for id in "${JOB_IDS[@]}"; do
-    s="$(curl -s "$BASE/visuals/$id" | jq -r '{id,status,provider,updatedAt}')"
-    echo "$s"
-
-    st="$(jq -r '.status // "unknown"' <<<"$s")"
-    case "$st" in
-      finished) ((doneCount++)) ;;
-      failed)   ((failCount++)) ;;
-      queued|processing|pending|unknown) ((pending++)) ;;
-    esac
-  done
+  # ...
+  case "$st" in
+    finished) ((doneCount++));;
+    failed)   ((failCount++));;
+    queued|processing|running|pending|unknown|"") ((pending++));;
+    *)        ((pending++));;
+  esac
+  # ...
+done
 
   # single-line live progress
   printf "\r[poll] finished=%d  failed=%d  pending=%d" \
