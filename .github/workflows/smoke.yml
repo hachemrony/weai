@@ -25,7 +25,7 @@ jobs:
           PORT: 3000
           NODE_ENV: test
           VISUAL_PROVIDER: mock
-          # keep the server happy even if we never call OpenAI
+          PROV: mock 
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_ENABLE: "false"
           MOD_ENABLE: "false"
@@ -57,6 +57,10 @@ jobs:
           path: |
             server.log
             docs/smoke-*.log
-      
+
+      - name: Dump server.log on failure
+        if: failure()
+        run: cat server.log || true
+            
 
 
