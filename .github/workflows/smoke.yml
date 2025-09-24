@@ -39,7 +39,15 @@ jobs:
 
       - name: Wait for port
         run: |
-          npx wait-on -t 10000 tcp:127.0.0.1:3000 || { cat server.pid && exit 1; }
+          npx wait-on -t 20000 tcp:127.0.0.1:3000 || { cat server.pid && exit 1; }
+
+      - name: Smoke (both@mock)
+        run: |
+          set -euo pipefail
+          curl -sS http://127.0.0.1:3000/api/v1/visuals/health | jq .
+          curl -sS http://127.0.0.1:3000/api/v1/visuals/providers | jq .
+          bash scripts/smoke-visuals-both.sh
+
 
       - name: Smoke (both=mock+mock)
         env:
