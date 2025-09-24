@@ -39,6 +39,7 @@ jobs:
         env:
           BASE: http://127.0.0.1:3000/api/v1
           VISUAL_PROVIDER: mock
+          PROV: mock 
         run: |
           set -euo pipefail
           curl -sS "$BASE/visuals/health" | jq .
