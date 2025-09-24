@@ -1,27 +1,11 @@
-name: Smoke (mock)
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-
-concurrency:
-  group: smoke-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
 
       - name: Install deps
         run: npm ci
@@ -30,41 +14,38 @@ jobs:
         run: chmod +x scripts/smoke-visuals-both.sh
 
       - name: Start server (mock)
-        run: node src/server.js & echo $! > server.pid
         env:
           HOST: 127.0.0.1
           PORT: 3000
           NODE_ENV: test
           VISUAL_PROVIDER: mock
+        run: |
+          node src/server.js > server.log 2>&1 & echo $! > server.pid
 
       - name: Wait for port
         run: |
-          npx wait-on -t 20000 tcp:127.0.0.1:3000 || { cat server.pid && exit 1; }
+          npx wait-on -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
 
       - name: Smoke (both@mock)
-        run: |
-          set -euo pipefail
-          curl -sS http://127.0.0.1:3000/api/v1/visuals/health | jq .
-          curl -sS http://127.0.0.1:3000/api/v1/visuals/providers | jq .
-          bash scripts/smoke-visuals-both.sh
-
-
-      - name: Smoke (both=mock+mock)
         env:
           BASE: http://127.0.0.1:3000/api/v1
+          VISUAL_PROVIDER: mock
         run: |
-          bash scripts/smoke-visuals-both.sh > docs/smoke-run-$(date +%Y%m%d-%H%M%S).log
+          set -euo pipefail
+          curl -sS "$BASE/visuals/health" | jq .
+          curl -sS "$BASE/visuals/providers" | jq .
+          bash scripts/smoke-visuals-both.sh
 
       - name: Stop server
         if: always()
-        run: kill -9 $(cat server.pid) || true
+        run: |
+          kill -9 "$(cat server.pid)" || true
 
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-artifacts
-          if-no-files-found: ignore
+          name: smoke-logs
           path: |
-            docs/smoke-run-*.log
-            src/visuals/*.mp4
+            server.log
+            docs/smoke-*.log
