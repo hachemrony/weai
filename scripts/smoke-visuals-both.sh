@@ -54,9 +54,25 @@ PAYLOAD="$(jq -n \
   + (if $duration>0 then {durationSec:$duration} else {} end)
 ')"
 
-RESP="$(ccurl -X POST "$BASE/visuals?provider=$PROV" \
+# POST and capture both body + status code (do NOT use the curl() wrapper)
+RESP="$(command curl -sS -w $'\n%{http_code}' \
   -H 'content-type: application/json' \
-  --data-raw "$PAYLOAD")"
+  --data-raw "$PAYLOAD" \
+  "$BASE/visuals?provider=$PROV")" || true
+
+# Split into body + code
+code="${RESP##*$'\n'}"
+body="${RESP%$'\n'$code}"
+
+# Pretty print if JSON; otherwise raw
+echo "$body" | jq . 2>/dev/null || echo "$body"
+
+# Treat any 4xx/5xx as failure (but with informative output)
+if [ "$code" -ge 400 ]; then
+  echo "[ERR] POST /visuals?provider=$PROV returned HTTP $code"
+  exit 22
+fi
+
 
 echo "$RESP" | jq .
 
