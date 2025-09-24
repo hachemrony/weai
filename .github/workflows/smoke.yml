@@ -1,3 +1,9 @@
+name: Smoke (mock)
+
+on:
+  push:
+  workflow_dispatch:
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -19,12 +25,10 @@ jobs:
           PORT: 3000
           NODE_ENV: test
           VISUAL_PROVIDER: mock
-        run: |
-          node src/server.js > server.log 2>&1 & echo $! > server.pid
+        run: node src/server.js > server.log 2>&1 & echo $! > server.pid
 
       - name: Wait for port
-        run: |
-          npx wait-on -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
+        run: npx --yes wait-on@7 -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
 
       - name: Smoke (both@mock)
         env:
@@ -38,8 +42,7 @@ jobs:
 
       - name: Stop server
         if: always()
-        run: |
-          kill -9 "$(cat server.pid)" || true
+        run: kill -9 $(cat server.pid) || true
 
       - name: Upload smoke artifacts
         if: always()

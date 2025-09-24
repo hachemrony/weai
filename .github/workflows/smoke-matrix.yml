@@ -3,86 +3,87 @@ name: Smoke (providers)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * *"  # daily 9:00 UTC (optional)
+    - cron: '0 9 * * *'  # daily @ 09:00 UTC (optional)
 
 jobs:
   seedream4:
-    # Map secrets to env first
+    # ✅ job-level 'if' can use the secrets context
+    if: ${{ secrets.SEEDREAM_API_BASE != '' && secrets.SEEDREAM_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       SEEDREAM_API_BASE: ${{ secrets.SEEDREAM_API_BASE }}
       SEEDREAM_API_KEY:  ${{ secrets.SEEDREAM_API_KEY }}
-    # Now gate the job using env.* (valid in job-level if:)
-    if: ${{ env.SEEDREAM_API_BASE != '' && env.SEEDREAM_API_KEY != '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
-      - name: Make smoke script executable
-        run: chmod +x scripts/smoke-visuals-both.sh
-      - name: Start server (mock)
+      - run: chmod +x scripts/smoke-visuals-both.sh
+
+      - name: Start server
         env:
           HOST: 127.0.0.1
           PORT: 3000
           NODE_ENV: test
-        run: |
-          node src/server.js & echo $! > server.pid
-          npx wait-on@8 -t 20000 tcp:127.0.0.1:3000 || ( cat server.pid && exit 1 )
+        run: node src/server.js > server.log 2>&1 & echo $! > server.pid
+
+      - name: Wait for port
+        run: npx --yes wait-on@7 -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
+
       - name: Smoke (seedream4)
         env:
           BASE: http://127.0.0.1:3000/api/v1
-          SEEDREAM_API_BASE: ${{ env.SEEDREAM_API_BASE }}
-          SEEDREAM_API_KEY:  ${{ env.SEEDREAM_API_KEY }}
           VISUAL_PROVIDER: seedream4
-        run: bash scripts/smoke-visuals-both.sh > docs/smoke-seedream4.log
+        run: bash scripts/smoke-visuals-both.sh
+
       - name: Stop server
         if: always()
         run: kill -9 $(cat server.pid) || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: smoke--seedream4
-          path: docs/smoke-*.log
 
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedream4-logs
+          path: |
+            server.log
+            docs/smoke-*.log
 
   nanobanana:
-    # Map secrets to env first
-    env:
-      NANOBANANA_API_URL: ${{ secrets.NANOBANANA_API_URL }}
-      NANOBANANA_API_KEY:  ${{ secrets.NANOBANANA_API_KEY }}
-    # Now gate the job using env.* (valid in job-level if:)
-    if: ${{ env.NANOBANANA_API_URL != '' && env.NANOBANANA_API_KEY != '' }}
+    if: ${{ secrets.NANOBANANA_API_URL != '' && secrets.NANOBANANA_API_KEY != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NANOBANANA_API_URL: ${{ secrets.NANOBANANA_API_URL }}
+      NANOBANANA_API_KEY: ${{ secrets.NANOBANANA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
-      - name: Make smoke script executable
-        run: chmod +x scripts/smoke-visuals-both.sh
-      - name: Start server (mock)
+      - run: chmod +x scripts/smoke-visuals-both.sh
+      - name: Start server
         env:
           HOST: 127.0.0.1
           PORT: 3000
           NODE_ENV: test
-        run: |
-          node src/server.js & echo $! > server.pid
-          npx wait-on@8 -t 20000 tcp:127.0.0.1:3000 || ( cat server.pid && exit 1 )
+        run: node src/server.js > server.log 2>&1 & echo $! > server.pid
+      - name: Wait for port
+        run: npx --yes wait-on@7 -t 60000 tcp:127.0.0.1:3000 || (echo '--- server.log ---'; cat server.log; exit 1)
       - name: Smoke (nanobanana)
         env:
           BASE: http://127.0.0.1:3000/api/v1
-          SEEDREAM_API_BASE: ${{ env.NANOBANANA_API_URL }}
-          SEEDREAM_API_KEY:  ${{ env.NANOBANANA_API_KEY }}
           VISUAL_PROVIDER: nanobanana
-        run: bash scripts/smoke-visuals-both.sh > docs/smoke-nanobanana.log
+        run: bash scripts/smoke-visuals-both.sh
       - name: Stop server
         if: always()
         run: kill -9 $(cat server.pid) || true
-      - uses: actions/upload-artifact@v4
+      - name: Upload logs
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: smoke--nanobanana
-          path: docs/smoke-*.log
+          name: nanobanana-logs
+          path: |
+            server.log
+            docs/smoke-*.log
